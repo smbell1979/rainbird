@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly sprinkler database backup
+
+[Timer]
+# Sundays 03:15: clear of CG-Stuff's 03:30 and the pool backup's 03:45. The
+# snapshot is a read-only .backup, so a watering run at the time is harmless.
+OnCalendar=Sun *-*-* 03:15:00
+# Runs at next boot if the NUC was off then; otherwise a missed week passes
+# with nothing saying so.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

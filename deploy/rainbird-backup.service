@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up the sprinkler database to git (smbell1979/rainbird-backup)
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# A user unit (like rainbird-service), so HOME and ~/.gitconfig are scott's
+# and the deploy key in ~/.ssh is found.
+# Through bash: the tree is copied from Windows, where the executable bit is lost.
+ExecStart=/usr/bin/bash %h/rainbird/deploy/backup.sh --apply
+
+#   systemctl --user status rainbird-backup
+#   journalctl --user -u rainbird-backup -n 20

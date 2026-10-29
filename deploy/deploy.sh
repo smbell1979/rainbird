@@ -40,7 +40,7 @@ Plan for $HOST:$REMOTE
   4. create $REMOTE/venv with python3, pip install service/requirements.txt
   5. run the service tests on the NUC (simulated controller only)
   6. npm ci and next build in web/
-  7. install the two units into ~/.config/systemd/user and daemon-reload (not enabled, not started)
+  7. install the units (service, web, weekly backup) into ~/.config/systemd/user and daemon-reload (none newly enabled or started)
 Nothing talks to the real controller until deploy.sh --start.
 EOF
 
@@ -88,6 +88,6 @@ echo "== 6. web build"
 ssh "$HOST" "cd $REMOTE/web && npm ci --no-audit --no-fund --loglevel=error && npm run build 2>&1 | tail -12"
 
 echo "== 7. units"
-ssh "$HOST" "mkdir -p ~/.config/systemd/user && cp $REMOTE/deploy/rainbird-*.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user --no-pager list-unit-files 'rainbird-*'"
+ssh "$HOST" "mkdir -p ~/.config/systemd/user && cp $REMOTE/deploy/rainbird-*.service $REMOTE/deploy/rainbird-*.timer ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user --no-pager list-unit-files 'rainbird-*'"
 
 echo; echo "Installed, not started. When ready: deploy/deploy.sh --start"
