@@ -24,6 +24,15 @@ controller lacks, starting with cycle and soak.
   home-screen apps match; tokens live in `web/src/app/globals.css`, shared
   pieces (status marks, banners) in `web/src/lib/ui.tsx`. Change colours in
   the pool app first.
+- **Backups:** weekly (Sundays 03:15 NUC time, `rainbird-backup.timer`) as a
+  plain-text SQL dump to the private repo `smbell1979/rainbird-backup`, via
+  `~/rainbird-backup` on the NUC, pushed with its own deploy key
+  `~/.ssh/id_ed25519_rainbird_backup`. `deploy/backup.sh` (dry run unless
+  `--apply`) refuses a corrupt snapshot, an empty one, or one that lost more
+  than half the run history. Restore: stop `rainbird-service`, then
+  `sqlite3 rainbird.db < rainbird.sql`. The first backup was restore-tested
+  from GitHub's copy into a fresh database: every table matched the live one.
+  The code itself is in `smbell1979/rainbird`.
 - The web build is copied over the NUC's tree, which never deletes anything:
   remove a deleted source file on amethyst by hand before rebuilding.
 - `deploy/deploy.sh`: dry run by default; `--apply --tz America/Phoenix`
