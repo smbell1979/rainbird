@@ -1,0 +1,4 @@
+# LF everywhere, including the working copy on Windows: deploy.sh and the
+# systemd units are copied from this tree to the NUC, and CRLF breaks both.
+* text=auto eol=lf
+*.png binary

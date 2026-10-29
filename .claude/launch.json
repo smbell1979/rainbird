@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "service-sim",
+      "runtimeExecutable": "F:/Claude/Rainbird/.venv313/Scripts/python.exe",
+      "runtimeArgs": ["-m", "rbservice", "--sim", "--speed", "10", "--tz", "America/Phoenix"],
+      "cwd": "F:/Claude/Rainbird/service",
+      "port": 8710
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "F:/Claude/Rainbird/web",
+      "port": 3000
+    }
+  ]
+}

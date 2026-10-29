@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/*
+ * Colour tokens, shared with the pool and weather apps (same house, same
+ * screens), copied verbatim from F:/Claude/PoolDataVisualizer. Change them
+ * there first; the series colours were validated all-pairs in both modes
+ * there (light worst CVD dE 9.2 / normal 24.0, dark 9.4 / 20.9).
+ *
+ * Here the three series colours identify plans (calendar) and the run lanes
+ * (timeline). Status colours are reserved for meaning (watered / skipped /
+ * failed, link health) and always appear with a label, never as a series.
+ *
+ * Only the names in @theme below exist as Tailwind classes. Series and status
+ * colours do not: write bg-[var(--status-good)], never bg-status-good, which
+ * silently renders nothing.
+ */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-2: #f0efeb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --hairline: rgba(11, 11, 11, 0.1);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+
+  --accent: #256abf;
+  --accent-ink: #ffffff;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #252523;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --hairline: rgba(255, 255, 255, 0.1);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --accent: #3987e5;
+  }
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-muted: var(--ink-muted);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+/* Only where numbers line up in columns: axis ticks, table cells, inputs. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The pool app's recipes, named so pages here stay short. */
+@layer components {
+  .card {
+    @apply rounded-2xl border border-hairline bg-surface p-4 sm:p-5;
+  }
+  .btn {
+    @apply rounded-full border border-hairline px-3 py-2 text-sm text-ink-2 transition-colors hover:text-ink disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply rounded-full bg-accent px-4 py-2 text-sm font-medium text-accent-ink shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60;
+  }
+  .btn-danger {
+    @apply rounded-full bg-[var(--status-critical)] px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60;
+  }
+  /* The pool app's Log-page field. 16 px text: smaller makes iOS zoom in on focus. */
+  .input {
+    @apply rounded-xl border border-hairline bg-surface px-3 py-2.5 text-base text-ink placeholder:text-ink-muted/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+    font-variant-numeric: tabular-nums;
+  }
+  .label {
+    @apply text-xs font-medium tracking-wide text-ink-muted uppercase;
+  }
+  .h1 {
+    @apply text-2xl font-semibold tracking-tight text-ink;
+  }
+  .h2 {
+    @apply text-[15px] font-medium tracking-tight text-ink;
+  }
+}

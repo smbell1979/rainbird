@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    A pop-up sprinkler head in the turf, throwing three drops. Same Dracula
+    palette and dark stroke (#21222c) as the CG-Stuff cube and the Games tiles
+    so the home screen icons sit together: green #50fa7b is Dracula's, blue
+    #5b8def matches the cube, the riser is Dracula's foreground #f8f8f2.
+
+    The drops stand upright on purpose. Tilted to follow the spray they read as
+    leaves, and the whole thing looked like a seedling. The slit across the
+    riser is the nozzle; without it the head reads as a post.
+
+    The 2.5 stroke stays a whole half-pixel at 16 px like the cube's.
+    app/apple-icon.png is rendered from this file by scripts/make-icons.cjs.
+  -->
+  <g stroke="#21222c" stroke-width="2.5" stroke-linejoin="round">
+    <g fill="#5b8def">
+      <path transform="translate(13 25) scale(1.35)" d="M0 -6.5C3 -2.5 5 0.5 5 2.5A5 5 0 0 1 -5 2.5C-5 0.5 -3 -2.5 0 -6.5Z"/>
+      <path transform="translate(32 14) scale(1.35)" d="M0 -6.5C3 -2.5 5 0.5 5 2.5A5 5 0 0 1 -5 2.5C-5 0.5 -3 -2.5 0 -6.5Z"/>
+      <path transform="translate(51 25) scale(1.35)" d="M0 -6.5C3 -2.5 5 0.5 5 2.5A5 5 0 0 1 -5 2.5C-5 0.5 -3 -2.5 0 -6.5Z"/>
+    </g>
+    <rect x="25.5" y="30" width="13" height="22" rx="3" fill="#f8f8f2"/>
+    <rect x="5" y="46" width="54" height="13" rx="5" fill="#50fa7b"/>
+  </g>
+  <rect x="28.5" y="35" width="7" height="2.5" rx="1.25" fill="#21222c"/>
+</svg>

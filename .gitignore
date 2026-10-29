@@ -1,0 +1,19 @@
+# Secrets: the controller PIN and the probe's lockout counter.
+controller-password.txt
+.probe-password-failures.json
+probe-logs/
+
+# Python
+.venv/
+.venv313/
+__pycache__/
+.pytest_cache/
+
+# Databases: the live one is on the NUC (~/rainbird/data); local ones are from the simulator.
+*.db
+*.db-wal
+*.db-shm
+data/
+
+# Local Claude settings (launch.json is shared and stays in)
+.claude/settings.local.json
