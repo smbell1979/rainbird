@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, dayAndTime, describeDays, hm, type Status } from "@/lib/api";
+import { addDays, api, dayAndTime, dayLabel, describeDays, hm, type Status } from "@/lib/api";
 import { Banner, StatusMark } from "@/lib/ui";
 import { useStatus, useZoneNames, zoneLabel } from "@/lib/useStatus";
 
@@ -19,7 +19,7 @@ export default function StatusPage() {
       <NowCard status={status} names={names} onChange={refresh} />
       <div className="grid gap-4 md:grid-cols-2">
         <ManualRun status={status} names={names} onChange={refresh} />
-        <NextRuns status={status} />
+        <NextRuns status={status} onChange={refresh} />
       </div>
       <ControllerCard status={status} />
     </div>
@@ -47,6 +47,14 @@ function Alerts({ status }: { status: Status }) {
       {status.paused_by_rain_delay && (
         <Banner tone="warn">
           A {status.rain_delay}-day rain delay is set on the controller, so plans are paused until it ends.
+        </Banner>
+      )}
+      {status.hold && (
+        <Banner tone="info">
+          {status.now.slice(0, 10) < status.hold.resume_on
+            ? <>Weather hold: no watering through {dayLabel(addDays(status.hold.resume_on, -1))}. Plans start
+                again {dayLabel(status.hold.resume_on)}.</>
+            : <>The weather hold is over: every plan that&apos;s on waters today at its usual time.</>}
         </Banner>
       )}
       {status.sensor_tripped && <Banner tone="warn">The rain sensor is tripped; scheduled plans will skip.</Banner>}
@@ -161,7 +169,7 @@ function ManualRun({ status, names, onChange }: { status: Status; names: Record<
   );
 }
 
-function NextRuns({ status }: { status: Status }) {
+function NextRuns({ status, onChange }: { status: Status; onChange: () => void }) {
   return (
     <section className="card space-y-3">
       <h2 className="h2">Coming up</h2>
@@ -175,7 +183,68 @@ function NextRuns({ status }: { status: Status }) {
         ))}
       </ul>
       <p className="text-xs text-ink-muted">Seasonal adjust: {status.settings.global_adjust_pct}%</p>
+      <WeatherHold status={status} onChange={onChange} />
     </section>
+  );
+}
+
+/**
+ * Named "weather hold", not "rain delay": the controller's own rain delay is a
+ * different thing (the fallback keeps it at 1 day) and is shown below.
+ */
+function WeatherHold({ status, onChange }: { status: Status; onChange: () => void }) {
+  const [days, setDays] = useState(3);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const today = status.now.slice(0, 10);
+  const hold = status.hold;
+  const holding = hold !== null && today < hold.resume_on;
+  const valid = Number.isInteger(days) && days >= 1 && days <= 14;
+
+  async function send(method: "PUT" | "DELETE") {
+    setBusy(true);
+    setNote(null);
+    try {
+      await api("hold", { method, body: method === "PUT" ? { days } : undefined });
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+      onChange();
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-hairline pt-3">
+      <div className="text-sm font-medium text-ink">Weather hold</div>
+      {holding ? (
+        <p className="text-sm text-ink-2">
+          No watering through {dayLabel(addDays(hold.resume_on, -1))}. On {dayLabel(hold.resume_on)},
+          every plan that&apos;s on waters at its usual time, and every-few-days plans count their days from then.
+        </p>
+      ) : (
+        <p className="text-xs text-ink-muted">
+          Skip watering for a few days (after a storm, say), then water every plan on the day after.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <input className="input w-20" type="number" min={1} max={14} value={days}
+               onChange={(e) => setDays(Number(e.target.value))} aria-label="Days to hold" />
+        <span className="text-sm text-ink-muted">days</span>
+        <button className="btn-primary" onClick={() => send("PUT")} disabled={busy || !valid}>
+          {holding ? "Change" : "Hold"}
+        </button>
+        {holding && <button className="btn" onClick={() => send("DELETE")} disabled={busy}>Cancel hold</button>}
+      </div>
+      <p className="text-xs text-ink-muted">
+        {valid
+          ? <>Today counts as day 1: {days === 1 ? "holds today" : `holds today through ${dayLabel(addDays(today, days - 1))}`},
+              plans start again {dayLabel(addDays(today, days))}.</>
+          : "1 to 14 days."}
+        {holding && " Cancelling puts plans back on their usual days."}
+      </p>
+      {note && <p className="text-sm text-ink-2">{note}</p>}
+    </div>
   );
 }
 

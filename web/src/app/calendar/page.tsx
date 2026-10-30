@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api, hm, WEEKDAYS, type Calendar, type Run, type Usage } from "@/lib/api";
+import { api, dayLabel, hm, WEEKDAYS, type Calendar, type Hold, type Run, type Usage } from "@/lib/api";
 import { Banner, StatusMark, StatusPill, Warning, type Level } from "@/lib/ui";
 import { useZoneNames, zoneLabel } from "@/lib/useStatus";
 
@@ -96,6 +96,15 @@ function fmtGal(t: Pick<Totals, "gallons" | "noGpm" | "zones">): string | null {
   return `${Math.round(t.gallons).toLocaleString()}${t.noGpm.length ? "+" : ""} gal`;
 }
 
+// Weather-hold days are hatched rather than tinted: a tint would read as one
+// more plan colour, and the out-of-month days already use the grey.
+const HATCH = {
+  backgroundImage:
+    "repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--ink-muted) 22%, transparent) 6px 7px)",
+};
+const holdOn = (hold: Hold | null | undefined, day: string): "held" | "resume" | null =>
+  !hold ? null : day >= hold.set_on && day < hold.resume_on ? "held" : day === hold.resume_on ? "resume" : null;
+
 // Seven day columns, plus a week-total column where there's room for one.
 const COLS = "grid grid-cols-7 sm:grid-cols-[repeat(7,minmax(0,1fr))_5.5rem]";
 
@@ -136,6 +145,7 @@ export default function CalendarPage() {
 
   const hasOff = cal?.expected.some((e) => !e.enabled) ?? false;
   const usage = cal && cal.first === grid[0] ? cal.usage : undefined;
+  const hold = cal?.hold;
   const weeks = useMemo(() => Array.from({ length: 6 }, (_, w) => grid.slice(w * 7, w * 7 + 7)), [grid]);
   const shown = selected ?? today;
   const title = parse(`${month}-01`).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
@@ -162,17 +172,26 @@ export default function CalendarPage() {
               const u = usage?.days[day];
               const inMonth = day.startsWith(month);
               const isToday = day === today;
+              const h = holdOn(hold, day);
               return (
                 <button
                   key={day}
                   onClick={() => setSelected(day)}
+                  style={h === "held" ? HATCH : undefined}
                   className={`flex min-h-16 flex-col border-hairline p-1 text-left sm:min-h-24
                     ${col ? "border-l" : ""} ${row ? "border-t" : ""}
                     ${inMonth ? "" : "bg-surface-2/50 text-ink-muted"}
                     ${shown === day ? "ring-2 ring-inset ring-accent" : "hover:bg-surface-2/60"}`}
                 >
-                  <div className={`mb-0.5 text-xs ${isToday ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent font-semibold text-accent-ink" : ""}`}>
-                    {Number(day.slice(8))}
+                  <div className="mb-0.5 flex items-center gap-1">
+                    <span className={`text-xs ${isToday ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent font-semibold text-accent-ink" : ""}`}>
+                      {Number(day.slice(8))}
+                    </span>
+                    {h && (
+                      <span className={`hidden text-[10px] font-medium sm:inline ${h === "held" ? "text-ink-2" : "text-accent"}`}>
+                        {h === "held" ? "hold" : "resume"}
+                      </span>
+                    )}
                   </div>
                   {d && <DayCell day={d} />}
                   {u && (
@@ -198,7 +217,7 @@ export default function CalendarPage() {
           </label>
         )}
       </div>
-      <DayDetail day={shown} today={today} data={byDay[shown]} usage={usage} names={names} />
+      <DayDetail day={shown} today={today} data={byDay[shown]} usage={usage} names={names} hold={hold} />
       <MonthSummary title={title} month={month} grid={grid} weeks={weeks} usage={usage} names={names} />
     </div>
   );
@@ -254,18 +273,20 @@ function Legend() {
       <span className="flex items-center gap-1"><span className={`h-3 w-5 rounded ${RUN_STYLE.done.chip}`} /> watered</span>
       <span className="flex items-center gap-1"><span className={`h-3 w-5 rounded ${RUN_STYLE.skipped.chip}`} /> skipped</span>
       <span className="flex items-center gap-1"><span className={`h-3 w-5 rounded ${RUN_STYLE.failed.chip}`} /> failed</span>
-      <span><span className="line-through">struck through</span> = held back by a rain delay</span>
+      <span className="flex items-center gap-1"><span className="h-3 w-5 rounded-sm border border-hairline" style={HATCH} /> weather hold</span>
+      <span><span className="line-through">struck through</span> = held back by a weather hold or rain delay</span>
     </div>
   );
 }
 
-function DayDetail({ day, today, data, usage, names }: {
-  day: string; today: string; data?: Day; usage?: Usage; names: Record<number, string>;
+function DayDetail({ day, today, data, usage, names, hold }: {
+  day: string; today: string; data?: Day; usage?: Usage; names: Record<number, string>; hold?: Hold | null;
 }) {
   const label = parse(day).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
   const empty = !data || (!data.runs.length && !data.expected.length && !data.controller.length);
   const totals = totalsFor(usage, [day]);
   const gal = fmtGal(totals);
+  const h = holdOn(hold, day);
   return (
     <section className="card space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4">
@@ -276,7 +297,15 @@ function DayDetail({ day, today, data, usage, names }: {
           </span>
         )}
       </div>
-      {empty && <p className="text-sm text-ink-muted">{day < today ? "Nothing ran." : "Nothing scheduled."}</p>}
+      {h === "held" && hold && (
+        <p className="text-sm text-ink-2">
+          Weather hold: no watering{day >= today && <>. Plans start again {dayLabel(hold.resume_on)}</>}.
+        </p>
+      )}
+      {h === "resume" && (
+        <p className="text-sm text-ink-2">First day after the weather hold: every plan that&apos;s on waters.</p>
+      )}
+      {empty && h !== "held" && <p className="text-sm text-ink-muted">{day < today ? "Nothing ran." : "Nothing scheduled."}</p>}
 
       {data?.runs.map((r) => {
         const st = runStyle(r.status);
@@ -315,6 +344,11 @@ function DayDetail({ day, today, data, usage, names }: {
               </span>
             </div>
             {e.held && <Warning>Won&apos;t run while the {e.held} lasts.</Warning>}
+            {e.resume && e.enabled && (
+              <p className="text-xs text-ink-muted">
+                The first run after the weather hold. Plans that water every few days count from here.
+              </p>
+            )}
             {!e.enabled && <p className="text-xs text-ink-muted">This plan is off; turn it on in Plans for it to run.</p>}
             <ZoneList zones={e.zones} names={names} />
           </div>

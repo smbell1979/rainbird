@@ -58,6 +58,8 @@ export type Status = {
   rain_delay: number | null;
   paused_by_rain_delay: boolean;
   sensor_tripped: boolean | null;
+  /** Up to and including its resume day; null otherwise. */
+  hold: Hold | null;
   available_zones: number[];
   controller_programs: ControllerProgram[];
   warnings: string[];
@@ -77,6 +79,9 @@ export type Status = {
   next_runs: { plan_id: number; name: string; at: string }[];
   settings: Settings;
 };
+
+/** Days set_on .. resume_on - 1 are held; every plan that is on waters on resume_on. */
+export type Hold = { set_on: string; resume_on: string; reanchored: boolean };
 
 export type Settings = {
   global_adjust_pct: number;
@@ -116,9 +121,13 @@ export type Calendar = {
     water_min: number;
     zones: { zone: number; minutes: number }[];
     held: string | null;
+    /** The first run after a weather hold, on a day the plan's own rule may not include. */
+    resume: boolean;
   }[];
   controller: { name: string; at: string; zones: number[]; held: boolean }[];
   runs: Run[];
+  /** The latest hold, even once ended, so its days stay marked looking back. */
+  hold: Hold | null;
   usage: Usage;
 };
 
@@ -176,7 +185,21 @@ export function dayAndTime(iso: string | null | undefined, todayIso?: string): s
   return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${hm(iso)}`;
 }
 
-export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/** "Sat, Nov 1" for a YYYY-MM-DD day, whatever the browser's time zone. */
+export function dayLabel(day: string): string {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString(undefined, {
+    weekday: "short", month: "short", day: "numeric", timeZone: "UTC",
+  });
+}
+
+/** YYYY-MM-DD plus n days, stepped in UTC so no DST change can shift it. */
+export function addDays(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export const WEEKDAYS =["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function describeDays(days: Days): string {
   if ("weekdays" in days) {

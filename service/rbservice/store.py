@@ -80,7 +80,7 @@ class Store:
 
     def settings(self) -> dict[str, Any]:
         stored = {r["key"]: json.loads(r["value"]) for r in self.db.execute("SELECT * FROM settings")}
-        return {**DEFAULT_SETTINGS, **stored}
+        return {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in DEFAULT_SETTINGS}}
 
     def update_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         unknown = set(values) - set(DEFAULT_SETTINGS)
@@ -89,6 +89,21 @@ class Store:
         for key, value in values.items():
             self.db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, json.dumps(value)))
         return self.settings()
+
+    # --- weather hold --------------------------------------------------------
+    # Kept in the settings table but outside DEFAULT_SETTINGS, so the Settings
+    # page's PUT can never write it, and a stale tab can't put back a hold
+    # that was cancelled.
+
+    def hold(self) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT value FROM settings WHERE key = 'weather_hold'").fetchone()
+        return json.loads(row["value"]) if row else None
+
+    def set_hold(self, hold: dict[str, Any] | None) -> None:
+        if hold is None:
+            self.db.execute("DELETE FROM settings WHERE key = 'weather_hold'")
+        else:
+            self.db.execute("INSERT OR REPLACE INTO settings VALUES ('weather_hold', ?)", (json.dumps(hold),))
 
     # --- zones ---------------------------------------------------------------
 

@@ -49,6 +49,14 @@ How it waters:
   or the panel ends the run instead of being fought.
 - **Seasonal adjust:** a global seasonal adjust plus an optional per-plan
   adjust. A zone that rounds to 0 min is reported, not dropped.
+- **Weather hold** (Status page, `PUT /api/hold {days}`, `DELETE /api/hold`):
+  no watering for N days counting today, then every plan that is on waters
+  on the day after at its usual time, and every-N-day plans count from that
+  day (their anchor is rewritten on it, once). Held days get a skipped run in
+  history and are hatched on the calendar. It lives in this service, not in
+  the controller's rain delay, which the fallback renews nightly and which
+  can't water every plan on the resume day. Cancelling before the resume day
+  puts plans back on their own days with no make-up run.
 
 ## Setup
 

@@ -78,6 +78,11 @@ class ZoneRunIn(BaseModel):
     minutes: int = Field(ge=1, le=120)
 
 
+class HoldIn(BaseModel):
+    # Today counts as day 1. 14 is the Rain Bird app's own longest rain delay.
+    days: int = Field(ge=1, le=14)
+
+
 class ZoneUpdateIn(BaseModel):
     """Either or both. gpm null clears it."""
     name: str | None = Field(None, max_length=40)
@@ -163,6 +168,16 @@ def create_app(service: Service) -> FastAPI:
     @app.post("/api/stop")
     async def stop() -> dict[str, Any]:
         return {"confirmed": await service.stop_all()}
+
+    @app.put("/api/hold")
+    def set_hold(body: HoldIn) -> dict[str, Any]:
+        return service.set_hold(body.days)
+
+    @app.delete("/api/hold")
+    def cancel_hold() -> dict[str, Any]:
+        if not service.cancel_hold():
+            raise HTTPException(409, "no weather hold to cancel (or it has already ended)")
+        return {"cancelled": True}
 
     @app.get("/api/zones")
     def zones() -> list[dict[str, Any]]:

@@ -50,6 +50,12 @@ FALLBACK_RETRY = dt.timedelta(minutes=5)
 SEGMENT_GAP_MIN = 0.25
 
 
+def _day(day: dt.date | str) -> str:
+    """"Sat Nov 1". Not %-d, which Windows' strftime rejects."""
+    d = dt.date.fromisoformat(day) if isinstance(day, str) else day
+    return f"{d:%a %b} {d.day}"
+
+
 def watered_minutes(segment: dict[str, Any]) -> float | None:
     """How long a cycle's valve was open. None when history can't say: cycles
     cut short before watered_min was recorded (added 2026-10-29)."""
@@ -352,6 +358,7 @@ class Service:
 
     async def _tick(self) -> None:
         now = self.clock.now()
+        self._end_hold(now.date())  # database only, so not waiting on the link
         if not self.link.health.connected:
             return
         settings = self.store.settings()
@@ -376,16 +383,48 @@ class Service:
         anchor = dt.date.fromisoformat(days["anchor"])
         return (day - anchor).days >= 0 and (day - anchor).days % days["every"] == 0
 
+    @staticmethod
+    def plan_day(plan: dict[str, Any], day: dt.date, hold: dict[str, Any] | None) -> str | None:
+        """What a plan does on a day: "due", "held" (due, but inside a weather
+        hold), "resume" (the hold's first day back) or None.
+
+        Every plan that is on waters on the resume day, whether or not its own
+        rule says so, and every-N-day plans count from that day afterwards:
+        otherwise an every-3 plan could water on the resume day and again the
+        next day, when its old cycle comes round. The anchor is rewritten to
+        match on the resume day (_end_hold); until then this works it out, so
+        the calendar shows the new cycle as soon as a hold is set.
+        """
+        if hold is not None:
+            set_on, resume_on = dt.date.fromisoformat(hold["set_on"]), dt.date.fromisoformat(hold["resume_on"])
+            if set_on <= day < resume_on:
+                return "held" if Service.plan_due_on(plan, day) else None
+            if plan["enabled"] and day == resume_on:
+                return "resume"
+            if plan["enabled"] and day > resume_on and "every" in plan["days"]:
+                return "due" if (day - resume_on).days % plan["days"]["every"] == 0 else None
+        return "due" if Service.plan_due_on(plan, day) else None
+
     def _maybe_start_plan(self, plan: dict[str, Any], now: dt.datetime, catch_up_min: int) -> None:
         today = now.date()
         if not plan["enabled"] or plan["last_started_date"] == today.isoformat():
             return
-        if not self.plan_due_on(plan, today):
+        hold = self.active_hold()
+        kind = self.plan_day(plan, today, hold)
+        if kind is None:
             return
         start = dt.datetime.combine(today, dt.time.fromisoformat(plan["start_time"]), tzinfo=now.tzinfo)
         if now < start:
             return
         self.store.mark_plan_started(plan["id"], today)
+        if kind == "held":
+            # Recorded even if the service was down at the start time: the
+            # hold, not the outage, is why it didn't water.
+            reason = f"weather hold; plans start again {_day(hold['resume_on'])}"  # type: ignore[index]
+            run_id = self.store.add_run("scheduled", plan["name"], now, plan["id"])
+            self.store.update_run(run_id, status="skipped", finished_at=now, detail={"reason": reason})
+            self.event("info", f"Skipped plan '{plan['name']}': {reason}")
+            return
         if now > start + dt.timedelta(minutes=catch_up_min):
             self.event("warn", f"Plan '{plan['name']}' at {plan['start_time']} was missed "
                                f"(service was down or busy for over {catch_up_min} min)")
@@ -403,8 +442,60 @@ class Service:
         occurrence, rather than being reported as missed or started late."""
         now = self.clock.now()
         start = dt.datetime.combine(now.date(), dt.time.fromisoformat(plan["start_time"]), tzinfo=now.tzinfo)
-        if self.plan_due_on(plan, now.date()) and now >= start:
+        if self.plan_day(plan, now.date(), self.active_hold()) and now >= start:
             self.store.mark_plan_started(plan["id"], now.date())
+
+    # --- weather hold --------------------------------------------------------
+    # Held in this service, not with the controller's rain delay: the
+    # fallback renews that nightly and reads a delay of 2+ as someone else's,
+    # and the controller can't be told to water every plan on the day after.
+
+    def active_hold(self) -> dict[str, Any] | None:
+        """The hold while it still decides anything: up to and including its resume day."""
+        hold = self.store.hold()
+        if hold is None or self.clock.now().date() > dt.date.fromisoformat(hold["resume_on"]):
+            return None
+        return hold
+
+    def set_hold(self, days: int) -> dict[str, Any]:
+        """Hold today and the next days-1 days; plans start again on the day after.
+        Setting it again while it holds changes the length; it still began when first set."""
+        today = self.clock.now().date()
+        current = self.active_hold()
+        holding = current is not None and today < dt.date.fromisoformat(current["resume_on"])
+        resume_on = today + dt.timedelta(days=days)
+        hold = {"set_on": current["set_on"] if holding else today.isoformat(),  # type: ignore[index]
+                "resume_on": resume_on.isoformat(), "reanchored": False}
+        self.store.set_hold(hold)
+        self.event("info", f"Weather hold: no watering through {_day(resume_on - dt.timedelta(days=1))}; "
+                           f"plans start again {_day(resume_on)}", **hold)
+        return hold
+
+    def cancel_hold(self) -> bool:
+        """Only before the resume day. Plans go back to their own days, as if
+        there had been no hold; nothing makes up for the days already held."""
+        hold = self.active_hold()
+        if hold is None or self.clock.now().date() >= dt.date.fromisoformat(hold["resume_on"]):
+            return False
+        self.store.set_hold(None)
+        self.event("info", "Weather hold cancelled: plans are back on their usual days")
+        return True
+
+    def _end_hold(self, today: dt.date) -> None:
+        """On (or, after an outage, any day after) the resume day, restart each
+        every-N-day plan's count from it, once."""
+        hold = self.store.hold()
+        if hold is None or hold.get("reanchored") or today < dt.date.fromisoformat(hold["resume_on"]):
+            return
+        resume_on = hold["resume_on"]
+        for plan in self.store.plans():
+            days = plan["days"]
+            if plan["enabled"] and "every" in days and days["anchor"] != resume_on:
+                self.store.save_plan({**plan, "days": {**days, "anchor": resume_on}}, plan["id"])
+                self.event("info", f"Plan '{plan['name']}' now counts its every {days['every']} days from "
+                                   f"{_day(resume_on)}, the first day after the weather hold",
+                           old_anchor=days["anchor"])
+        self.store.set_hold({**hold, "reanchored": True})
 
     def enqueue_plan(self, plan: dict[str, Any], kind: str) -> int:
         zones = [ZoneSpec(z["zone"], z["total_min"], z.get("cycle_min", 0), z.get("soak_min", 0))
@@ -671,13 +762,14 @@ class Service:
 
     def next_runs(self, days: int = 14) -> list[dict[str, Any]]:
         now = self.clock.now()
+        hold = self.active_hold()
         out = []
         for plan in self.store.plans():
             if not plan["enabled"]:
                 continue
             for offset in range(days):
                 day = now.date() + dt.timedelta(days=offset)
-                if not self.plan_due_on(plan, day):
+                if self.plan_day(plan, day, hold) not in ("due", "resume"):
                     continue
                 at = dt.datetime.combine(day, dt.time.fromisoformat(plan["start_time"]), tzinfo=now.tzinfo)
                 if at <= now and plan["last_started_date"] == day.isoformat():
@@ -702,6 +794,7 @@ class Service:
         last = first + dt.timedelta(days=days - 1)
         settings = self.store.settings()
         delay = self.state.rain_delay or 0
+        hold = self.active_hold()
 
         expected = []
         for plan in self.store.plans():
@@ -712,7 +805,8 @@ class Service:
             start_time = dt.time.fromisoformat(plan["start_time"])
             for offset in range(days):
                 day = first + dt.timedelta(days=offset)
-                if day < today or not self.plan_due_on(plan, day):
+                kind = self.plan_day(plan, day, hold)
+                if day < today or kind is None:
                     continue
                 at = dt.datetime.combine(day, start_time, tzinfo=now.tzinfo)
                 if at <= now:
@@ -729,7 +823,8 @@ class Service:
                     "at": at.isoformat(),
                     "ends_at": (at + dt.timedelta(minutes=pv["duration_min"])).isoformat(),
                     "water_min": pv["water_min"], "zones": zones,
-                    "held": f"{delay}-day rain delay" if held else None,
+                    "held": "weather hold" if kind == "held" else f"{delay}-day rain delay" if held else None,
+                    "resume": kind == "resume",
                 })
 
         controller = []
@@ -756,6 +851,9 @@ class Service:
             "expected": sorted(expected, key=lambda e: e["at"]),
             "controller": sorted(controller, key=lambda e: e["at"]),
             "runs": runs,
+            # The latest hold even once it has ended, so its days stay marked
+            # looking back (until the next hold replaces it).
+            "hold": self.store.hold(),
             # GPM is applied at read time, so changing a zone's GPM restates its past gallons.
             "usage": water_usage(history, self.store.zone_gpm()),
         }
@@ -801,6 +899,7 @@ class Service:
             "rain_delay": s.rain_delay,
             "paused_by_rain_delay": s.paused_by_rain_delay,
             "sensor_tripped": s.sensor_tripped,
+            "hold": self.active_hold(),
             "available_zones": s.available_zones,
             "controller_programs": [p.__dict__ | {"first_due": p.first_due.isoformat() if p.first_due else None}
                                     for p in s.controller_programs],
