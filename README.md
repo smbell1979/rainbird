@@ -29,15 +29,27 @@ controller lacks, starting with cycle and soak.
   `~/rainbird-backup` on the NUC, pushed with its own deploy key
   `~/.ssh/id_ed25519_rainbird_backup`. `deploy/backup.sh` (dry run unless
   `--apply`) refuses a corrupt snapshot, an empty one, or one that lost more
-  than half the run history. Restore: stop `rainbird-service`, then
-  `sqlite3 rainbird.db < rainbird.sql`. The first backup was restore-tested
+  than half the run history. Restore: `docker compose stop service` in
+  `~/rainbird`, then `sqlite3 rainbird.db < rainbird.sql`. The first backup was restore-tested
   from GitHub's copy into a fresh database: every table matched the live one.
   The code itself is in `smbell1979/rainbird`.
-- The web build is copied over the NUC's tree, which never deletes anything:
-  remove a deleted source file on amethyst by hand before rebuilding.
-- `deploy/deploy.sh`: dry run by default; `--apply --tz America/Phoenix`
-  copies, builds and tests on amethyst without starting anything; `--start`
-  enables both systemd user services.
+- **Runs as two containers** on amethyst, `rainbird-service` and
+  `rainbird-web` (`docker-compose.yml`, `~/rainbird` on the NUC), the same
+  shape as Pool and Weather, so they show in Beszel next to them. Both use
+  host networking: the API stays on 127.0.0.1:8710 and the page on 3004, and
+  the controller is reached directly on the LAN. The database is the bind
+  mount `~/rainbird/data`, the PIN `~/rainbird/controller-pin.txt` (mounted
+  read-only). The time zone is set in the compose file. Until 2026-11-03 they
+  were systemd user services; the first container deploy retired those.
+- **Deploy:** `deploy/ship.sh` (committed work; `--dirty` for a throwaway
+  build) copies the tree to the NUC, replacing the source directories, and
+  runs `deploy/remote-deploy.sh` there. That builds both images (the service
+  image runs the whole test suite against the simulator) while the running
+  version carries on, then switches, but refuses to while a zone is watering
+  or a run is queued (`FORCE=1` overrides). Images are tagged with their
+  commit; `deploy/rollback.sh` lists them and switches back without a
+  rebuild. The service gets 90 s to stop, so a stop mid-run closes the valve
+  and confirms it.
 
 How it waters:
 - **Fallback:** the controller keeps its own programs as a backup. Each night

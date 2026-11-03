@@ -1,0 +1,63 @@
+# Sprinklers, on the NUC next to CG-Stuff (3000), Pool (3001) and Weather (3002).
+#
+#   docker compose ps
+#   docker compose logs -f service
+#
+# Deploy with deploy/ship.sh from the PC, not with `up` by hand: it refuses to
+# switch while a zone is watering, and the first time it retires the old
+# systemd user services.
+
+services:
+  service:
+    # No `build:` on purpose. deploy/remote-deploy.sh builds and tags each image
+    # with its commit; this file only says which tag runs, read from .env, so
+    # switching versions (and rolling back) is a file write and a restart.
+    image: rainbird-service:${IMAGE_TAG:-latest}
+    container_name: rainbird-service
+    restart: unless-stopped
+    # Host networking: the API stays on 127.0.0.1:8710 exactly as before (the
+    # service binds localhost only, and the page, the backup and the checks all
+    # find it there), and the controller on the LAN is reached directly.
+    network_mode: host
+    environment:
+      RAINBIRD_HOST: "192.168.0.105"
+      # The one place the sprinklers' zone is set. A wrong zone shifts every
+      # start time without any error.
+      RAINBIRD_TZ: "America/Phoenix"
+      # Only for the log lines' timestamps (UTC otherwise).
+      TZ: "America/Phoenix"
+      RAINBIRD_DB: "/data/rainbird.db"
+      RAINBIRD_PASSWORD_FILE: "/run/rainbird/pin"
+    volumes:
+      # A bind mount, not a named volume: deploy/backup.sh reads it from the
+      # host, and a visible path can be copied without knowing Docker.
+      - ./data:/data
+      - ./controller-pin.txt:/run/rainbird/pin:ro
+    # On stop the service cancels the current run, which sends stop to the
+    # controller and confirms the valve closed. Docker's default 10 s would
+    # kill it partway through that.
+    stop_grace_period: 90s
+    healthcheck:
+      # Answers from the service's cache, so this never reaches the module.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8710/api/status', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  web:
+    image: rainbird-web:${IMAGE_TAG:-latest}
+    container_name: rainbird-web
+    restart: unless-stopped
+    # Host networking so the proxy reaches the service on 127.0.0.1:8710.
+    network_mode: host
+    environment:
+      RAINBIRD_API: "http://127.0.0.1:8710"
+    depends_on:
+      - service
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      start_period: 20s
+      retries: 3

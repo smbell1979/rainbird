@@ -1,0 +1,10 @@
+# node_modules especially: it is reinstalled in the image from the lockfile,
+# and a Windows-built tree in a Linux image breaks native modules.
+node_modules
+.next
+.env
+.env.local
+*.log
+*.tsbuildinfo
+Dockerfile
+.dockerignore

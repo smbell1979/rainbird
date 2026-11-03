@@ -17,3 +17,7 @@ data/
 
 # Local Claude settings (launch.json is shared and stays in)
 .claude/settings.local.json
+
+# Deploy: written by deploy/ship.sh, and the running image tag on the NUC
+VERSION
+.env
