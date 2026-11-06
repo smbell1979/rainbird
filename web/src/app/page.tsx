@@ -103,9 +103,8 @@ function NowCard({ status, names, onChange }: { status: Status; names: Record<nu
               {cur.remaining && (
                 <div className="flex flex-wrap gap-1.5 pt-1 text-xs">
                   {Object.entries(cur.remaining).map(([z, m]) => (
-                    <span key={z} className="tabular rounded-full bg-surface-2 px-2.5 py-1 text-ink-2">
-                      {zoneLabel(Number(z), names)}: {m} min left
-                    </span>
+                    <ZonePill key={z} label={zoneLabel(Number(z), names)} minutes={m}
+                              state={m === 0 ? "done" : cur.phase === "watering" && cur.zone === Number(z) ? "now" : "waiting"} />
                   ))}
                 </div>
               )}
@@ -129,6 +128,36 @@ function NowCard({ status, names, onChange }: { status: Status; names: Record<nu
       </div>
       {note && <p className="pt-2 text-sm text-ink-2">{note}</p>}
     </section>
+  );
+}
+
+/**
+ * One zone of the current run. Each state pairs colour with a glyph or dot and
+ * words, as the status marks do elsewhere: done is the green check, the zone
+ * watering now has the accent ring and a live dot (the Controller card's
+ * "connected" pill), and the rest stay plain until their turn.
+ */
+function ZonePill({ label, minutes, state }: { label: string; minutes: number; state: "done" | "now" | "waiting" }) {
+  if (state === "done") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--status-good)]/12 py-1 pr-2.5 pl-1 text-ink-2">
+        <StatusMark level="good" />
+        {label}: done
+      </span>
+    );
+  }
+  if (state === "now") {
+    return (
+      <span className="tabular inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 font-medium text-ink ring-1 ring-accent">
+        <span className="h-2 w-2 rounded-full bg-accent motion-safe:animate-pulse" aria-hidden />
+        {label}: {minutes} min left
+      </span>
+    );
+  }
+  return (
+    <span className="tabular rounded-full bg-surface-2 px-2.5 py-1 text-ink-2">
+      {label}: {minutes} min to go
+    </span>
   );
 }
 
