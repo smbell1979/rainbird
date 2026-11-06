@@ -27,14 +27,22 @@ export function useStatus(intervalMs = 5000) {
   return { status, error, refresh };
 }
 
-export function useZoneNames() {
-  const [names, setNames] = useState<Record<number, string>>({});
+/** Zone names, and flow for the zones that have one set (a missing zone means no GPM, never 0). */
+export function useZones() {
+  const [zones, setZones] = useState<{ names: Record<number, string>; gpm: Record<number, number> }>({ names: {}, gpm: {} });
   useEffect(() => {
-    api<{ zone: number; name: string }[]>("zones")
-      .then((zs) => setNames(Object.fromEntries(zs.map((z) => [z.zone, z.name]))))
+    api<{ zone: number; name: string; gpm: number | null }[]>("zones")
+      .then((zs) => setZones({
+        names: Object.fromEntries(zs.map((z) => [z.zone, z.name])),
+        gpm: Object.fromEntries(zs.filter((z) => z.gpm != null).map((z) => [z.zone, z.gpm as number])),
+      }))
       .catch(() => {});
   }, []);
-  return names;
+  return zones;
+}
+
+export function useZoneNames() {
+  return useZones().names;
 }
 
 export function zoneLabel(zone: number, names: Record<number, string>): string {

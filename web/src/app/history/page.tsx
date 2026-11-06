@@ -3,20 +3,31 @@
 import { useEffect, useState } from "react";
 import { api, dayAndTime, hm, type Event, type Run } from "@/lib/api";
 import { Banner, StatusMark, StatusPill, type Level } from "@/lib/ui";
-import { useZoneNames, zoneLabel } from "@/lib/useStatus";
+import { useZones, zoneLabel } from "@/lib/useStatus";
 
 type Seg = NonNullable<Run["detail"]["segments"]>[number];
 
 // Old cut-short cycles have no watered_min; only a finished one can stand in its minutes.
 const watered = (s: Seg) => s.watered_min ?? (s.result === "ok" ? s.minutes : 0);
 
-/** " · 6 zones · 72 min of water", or nothing when no zone ran. */
-function waterLine(r: Run): string {
+// "+" before the unit, as the calendar writes it: the number is a floor.
+const fmtGal = (g: number, partial = false) => `${Math.round(g).toLocaleString()}${partial ? "+" : ""} gal`;
+
+/**
+ * " · 6 zones · 72 min · 324 gal of water", or nothing when no zone ran.
+ * Gallons are minutes x each zone's GPM as set now (as the calendar does), so
+ * changing a GPM restates past runs. Zones without a GPM add nothing, and a
+ * "+" says the number leaves them out; with none set there are no gallons.
+ */
+function waterLine(r: Run, gpm: Record<number, number>): string {
   const segs = r.detail.segments ?? [];
-  const minutes = segs.reduce((a, s) => a + watered(s), 0);
   if (!segs.length) return "";
-  const zones = new Set(segs.map((s) => s.zone)).size;
-  return ` · ${zones} zone${zones > 1 ? "s" : ""} · ${+minutes.toFixed(1)} min of water`;
+  const minutes = segs.reduce((a, s) => a + watered(s), 0);
+  const zones = new Set(segs.map((s) => s.zone));
+  const known = [...zones].filter((z) => gpm[z] !== undefined);
+  const gallons = segs.reduce((a, s) => a + watered(s) * (gpm[s.zone] ?? 0), 0);
+  const gal = known.length ? ` · ${fmtGal(gallons, known.length < zones.size)}` : "";
+  return ` · ${zones.size} zone${zones.size > 1 ? "s" : ""} · ${+minutes.toFixed(1)} min${gal} of water`;
 }
 
 /** HH:MM of a run's start plus some minutes. Clock arithmetic on the service's
@@ -40,7 +51,8 @@ const BAR: Record<string, string> = {
  * A strip with a bar per cycle across the run's length (the gaps are soaks
  * and the time between zones), then a line per cycle with its clock time.
  */
-function Segments({ run, names }: { run: Run; names: Record<number, string> }) {
+function Segments({ run, names, gpm }: { run: Run; names: Record<number, string>; gpm: Record<number, number> }) {
+  const gal = (s: Seg) => (gpm[s.zone] !== undefined ? fmtGal(watered(s) * gpm[s.zone]) : null);
   const segs = run.detail.segments ?? [];
   const start = run.started_at ?? run.queued_at;
   const total = Math.max(1, ...segs.map((s) => s.at_min + Math.max(watered(s), s.minutes)));
@@ -51,7 +63,7 @@ function Segments({ run, names }: { run: Run; names: Record<number, string> }) {
           <div key={i}
                className={`absolute top-0 flex h-5 items-center overflow-hidden rounded-sm pl-1 text-[10px] font-medium text-ink ${BAR[s.result] ?? BAR.failed}`}
                style={{ left: `${(s.at_min / total) * 100}%`, width: `max(3px, ${(Math.max(watered(s), 0.1) / total) * 100}%)` }}
-               title={`${clockPlus(start, s.at_min)} ${zoneLabel(s.zone, names)}: ${+watered(s).toFixed(1)} min`}>
+               title={`${clockPlus(start, s.at_min)} ${zoneLabel(s.zone, names)}: ${+watered(s).toFixed(1)} min${gal(s) ? `, ${gal(s)}` : ""}`}>
             {s.zone}
           </div>
         ))}
@@ -67,6 +79,7 @@ function Segments({ run, names }: { run: Run; names: Record<number, string> }) {
             </span>
             <span className="text-right text-ink-2">
               {+watered(s).toFixed(1)} min{s.result !== "ok" && <span className="text-ink-muted"> of {s.minutes}</span>}
+              {gal(s) && <span className="text-ink-muted"> · {gal(s)}</span>}
             </span>
           </li>
         ))}
@@ -96,7 +109,7 @@ export default function HistoryPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const names = useZoneNames();
+  const { names, gpm } = useZones();
 
   useEffect(() => {
     const load = () =>
@@ -120,7 +133,7 @@ export default function HistoryPage() {
               <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 text-sm">
                 <span>
                   <span className="font-medium text-ink">{r.name}</span>
-                  <span className="ml-2 text-xs text-ink-muted">{r.kind}{waterLine(r)}</span>
+                  <span className="ml-2 text-xs text-ink-muted">{r.kind}{waterLine(r, gpm)}</span>
                 </span>
                 <span className="flex items-center gap-3 text-ink-2">
                   <span className="tabular">
@@ -136,7 +149,7 @@ export default function HistoryPage() {
                   <p key={w} className="flex items-start gap-1.5"><StatusMark level="warning" className="mt-px" />{w}</p>
                 ))}
                 {r.detail.segments && r.detail.segments.length > 0 && (
-                  <Segments run={r} names={names} />
+                  <Segments run={r} names={names} gpm={gpm} />
                 )}
               </div>
             </details>
