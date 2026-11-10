@@ -8,6 +8,13 @@ import { Timeline } from "./Timeline";
 
 const today = () => new Date().toLocaleDateString("sv"); // YYYY-MM-DD in local time
 
+/** planner.adjusted_minutes: whole minutes, half rounded up, in integers so 12 at 50% is exactly 6. */
+function adjustedMinutes(base: number, ...pcts: number[]): number {
+  const num = pcts.reduce((a, p) => a * p, base);
+  const den = 100 ** pcts.length;
+  return Math.floor((2 * num + den) / (2 * den));
+}
+
 function blank(): PlanInput {
   return {
     name: "",
@@ -53,6 +60,13 @@ export function PlanEditor({ plan, names, onDone }: {
     set({ zones: draft.zones.map((z, j) => (j === i ? { ...z, ...patch } : z)) });
   const unused = zones.filter((z) => !draft.zones.some((e) => e.zone === z));
   const byWeekday = "weekdays" in draft.days;
+  // The seasonal % is the service's (Settings); the plan % is the draft's own,
+  // so both columns follow edits before the preview comes back.
+  const seasonal = preview?.adjust.global_pct;
+  // What will run comes from the service's preview, not this page's arithmetic.
+  // It is rounded once from total x seasonal x plan, so on rare totals it can
+  // differ by a minute from rounding the seasonal column again.
+  const runs = (zone: number) => preview?.zones.find((p) => p.zone === zone)?.total_min ?? 0;
 
   async function save() {
     setSaving(true);
@@ -148,7 +162,16 @@ export function PlanEditor({ plan, names, onDone }: {
         <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-ink-muted">
-            <tr><th className="py-1">Zone</th><th>Total min</th><th>Max per cycle</th><th>Soak min</th><th /></tr>
+            <tr>
+              <th className="py-1">Zone</th><th>Total min</th>
+              <th className="px-2 text-right whitespace-nowrap" title="Total min x the seasonal adjust in Settings">
+                Seasonal {seasonal ?? "…"}%
+              </th>
+              <th className="px-2 text-right whitespace-nowrap" title="Then x this plan's adjust: the minutes that will run">
+                Plan {draft.adjust_pct}% · runs
+              </th>
+              <th className="pl-2">Max per cycle</th><th>Soak min</th><th />
+            </tr>
           </thead>
           <tbody>
             {draft.zones.map((z, i) => (
@@ -162,7 +185,16 @@ export function PlanEditor({ plan, names, onDone }: {
                 </td>
                 <td><input className="input w-16 px-2 sm:w-20 sm:px-3" type="number" min={1} max={360} value={z.total_min}
                            onChange={(e) => setZone(i, { total_min: Number(e.target.value) })} /></td>
-                <td><input className="input w-16 px-2 sm:w-20 sm:px-3" type="number" min={0} max={120} value={z.cycle_min}
+                <td className="tabular px-2 text-right text-ink">
+                  {seasonal === undefined ? "…" : adjustedMinutes(z.total_min, seasonal)}
+                </td>
+                <td className="tabular px-2 text-right font-medium">
+                  {!preview || previewError ? <span className="text-ink-muted">…</span>
+                    : runs(z.zone) === 0
+                      ? <span className="text-[var(--status-critical)]" title="Rounds to 0 min: won't water">0 min</span>
+                      : <span className="text-ink">{runs(z.zone)} min</span>}
+                </td>
+                <td className="pl-2"><input className="input w-16 px-2 sm:w-20 sm:px-3" type="number" min={0} max={120} value={z.cycle_min}
                            onChange={(e) => setZone(i, { cycle_min: Number(e.target.value) })} />
                   {z.cycle_min === 0 && <span className="ml-1 text-xs text-ink-muted">no cycling</span>}</td>
                 <td><input className="input w-16 px-2 sm:w-20 sm:px-3" type="number" min={0} max={240} value={z.soak_min}
