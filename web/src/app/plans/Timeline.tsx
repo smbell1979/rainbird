@@ -84,7 +84,7 @@ export function Timeline({ preview, names }: { preview: Preview; names: Record<n
       )}
       {zones.map((zone) => (
         <div key={zone} className="flex items-center gap-2 text-xs">
-          <div className="w-28 shrink-0 truncate text-ink-muted">{zoneLabel(zone, names)}</div>
+          <div className="w-28 shrink-0 truncate text-ink-2 sm:w-36" title={zoneLabel(zone, names)}>{zoneLabel(zone, names)}</div>
           <div className="flex-1 space-y-0.5">
             {compare && <Lane segments={written.segments.filter((s) => s.zone === zone)} total={total} faint />}
             <Lane segments={preview.segments.filter((s) => s.zone === zone)} total={total}
@@ -93,7 +93,7 @@ export function Timeline({ preview, names }: { preview: Preview; names: Record<n
         </div>
       ))}
       <div className="flex gap-2 text-[10px] text-ink-muted">
-        <div className="w-28 shrink-0" />
+        <div className="w-28 shrink-0 sm:w-36" />
         <div className="relative h-3 flex-1">
           {ticks.map((t) => (
             <span key={t} className="absolute -translate-x-1/2" style={{ left: `${(t / total) * 100}%` }}>
