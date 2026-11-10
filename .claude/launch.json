@@ -9,6 +9,13 @@
       "port": 8710
     },
     {
+      "name": "service-sim-realtime",
+      "runtimeExecutable": "F:/Claude/Rainbird/.venv313/Scripts/python.exe",
+      "runtimeArgs": ["-m", "rbservice", "--sim", "--tz", "America/Phoenix"],
+      "cwd": "F:/Claude/Rainbird/service",
+      "port": 8710
+    },
+    {
       "name": "web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],

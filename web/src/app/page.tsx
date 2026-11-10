@@ -3,11 +3,20 @@
 import { useState } from "react";
 import { addDays, api, dayAndTime, dayLabel, describeDays, hm, type Status } from "@/lib/api";
 import { Banner, StatusMark } from "@/lib/ui";
-import { useStatus, useZoneNames, zoneLabel } from "@/lib/useStatus";
+import { useServiceNow, useStatus, useZoneNames, zoneLabel } from "@/lib/useStatus";
+
+/** "12:34", or "1:02:03" past an hour. */
+function clock(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const mm = String(Math.floor((s % 3600) / 60));
+  const ss = String(s % 60).padStart(2, "0");
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mm.padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
+}
 
 export default function StatusPage() {
-  const { status, error, refresh } = useStatus();
+  const { status, receivedAt, error, refresh } = useStatus();
   const names = useZoneNames();
+  const now = useServiceNow(status, receivedAt);
 
   if (error && !status) return <Banner tone="error">{error}</Banner>;
   if (!status) return <p className="text-ink-muted">Loading…</p>;
@@ -16,12 +25,12 @@ export default function StatusPage() {
     <div className="space-y-4">
       {error && <Banner tone="error">Lost contact with the service: {error}</Banner>}
       <Alerts status={status} />
-      <NowCard status={status} names={names} onChange={refresh} />
+      <NowCard status={status} names={names} now={now} onChange={refresh} />
       <div className="grid gap-4 md:grid-cols-2">
         <ManualRun status={status} names={names} onChange={refresh} />
         <NextRuns status={status} onChange={refresh} />
       </div>
-      <ControllerCard status={status} />
+      <ControllerCard status={status} names={names} />
     </div>
   );
 }
@@ -65,11 +74,18 @@ function Alerts({ status }: { status: Status }) {
   );
 }
 
-function NowCard({ status, names, onChange }: { status: Status; names: Record<number, string>; onChange: () => void }) {
+function NowCard({ status, names, now, onChange }: {
+  status: Status; names: Record<number, string>; now: number | null; onChange: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const cur = status.current;
   const watering = status.running.length > 0;
+  const secondsUntil = (iso?: string) => (iso && now !== null ? Math.max(0, (Date.parse(iso) - now) / 1000) : null);
+  // The status only changes when a cycle starts or ends, so the countdown is
+  // worked out here each second from the cycle's end time.
+  const cycleLeft = cur?.phase === "watering" ? secondsUntil(cur.ends_at) : null;
+  const soakLeft = cur?.phase === "soaking" ? secondsUntil(cur.soak_until) : null;
 
   async function stop() {
     setBusy(true);
@@ -97,27 +113,41 @@ function NowCard({ status, names, onChange }: { status: Status; names: Record<nu
                 {cur.phase === "watering" && cur.zone != null && (
                   <>Watering {zoneLabel(cur.zone, names)} for {cur.minutes} min, until {hm(cur.ends_at)}</>
                 )}
-                {cur.phase === "soaking" && <>Soaking until {hm(cur.soak_until)}</>}
+                {cur.phase === "soaking" && (
+                  <>Soaking until {hm(cur.soak_until)}{soakLeft !== null && <span className="tabular"> · {clock(soakLeft)} left</span>}</>
+                )}
                 {cur.phase !== "watering" && cur.phase !== "soaking" && <>{cur.phase}…</>}
               </div>
               {cur.remaining && (
                 <div className="flex flex-wrap gap-1.5 pt-1 text-xs">
-                  {Object.entries(cur.remaining).map(([z, m]) => (
-                    <ZonePill key={z} label={zoneLabel(Number(z), names)} minutes={m}
-                              state={m === 0 ? "done" : cur.phase === "watering" && cur.zone === Number(z) ? "now" : "waiting"} />
-                  ))}
+                  {Object.entries(cur.remaining).map(([z, m]) => {
+                    const isNow = cur.phase === "watering" && cur.zone === Number(z);
+                    return (
+                      <ZonePill key={z} label={zoneLabel(Number(z), names)} minutes={m}
+                                state={m === 0 ? "done" : isNow ? "now" : "waiting"}
+                                // remaining counts this whole cycle until it ends, so take
+                                // the cycle out and put back what's left of it
+                                secondsLeft={isNow && cycleLeft !== null && cur.minutes ? (m - cur.minutes) * 60 + cycleLeft : undefined}
+                                progress={isNow && cycleLeft !== null && cur.minutes ? 1 - cycleLeft / (cur.minutes * 60) : undefined} />
+                    );
+                  })}
                 </div>
               )}
             </>
           ) : (
-            <div className="text-[28px] leading-tight font-semibold tracking-tight text-ink">
-              {watering ? "Watering (not started here)" : "Idle"}
-            </div>
+            <>
+              <div className="text-[28px] leading-tight font-semibold tracking-tight text-ink">
+                {watering ? "Watering (not started here)" : "Idle"}
+              </div>
+              {/* Nothing else on this card names the zone when the app, the panel or a controller program started it. */}
+              {watering && (
+                <div className="text-sm text-ink-2">
+                  {status.running.map((z) => zoneLabel(z, names)).join(", ")}, from the Rain Bird app, the panel or a
+                  controller program
+                </div>
+              )}
+            </>
           )}
-          <div className="pt-1 text-xs text-ink-muted">
-            Running on the controller: {watering ? status.running.map((z) => zoneLabel(z, names)).join(", ") : "nothing"}
-            {status.running_read_at && <> · read {hm(status.running_read_at)}</>}
-          </div>
           {status.queued.length > 0 && (
             <div className="text-xs text-ink-muted">Queued: {status.queued.map((q) => q.name).join(", ")}</div>
           )}
@@ -137,7 +167,9 @@ function NowCard({ status, names, onChange }: { status: Status; names: Record<nu
  * watering now has the accent ring and a live dot (the Controller card's
  * "connected" pill), and the rest stay plain until their turn.
  */
-function ZonePill({ label, minutes, state }: { label: string; minutes: number; state: "done" | "now" | "waiting" }) {
+function ZonePill({ label, minutes, state, secondsLeft, progress }: {
+  label: string; minutes: number; state: "done" | "now" | "waiting"; secondsLeft?: number; progress?: number;
+}) {
   if (state === "done") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-[var(--status-good)]/12 py-1 pr-2.5 pl-1 text-ink-2">
@@ -147,10 +179,18 @@ function ZonePill({ label, minutes, state }: { label: string; minutes: number; s
     );
   }
   if (state === "now") {
+    // The pill fills from the left as the cycle runs: a deeper accent tint for
+    // the part done. Two stops at the same point make a hard edge.
+    const p = Math.round(Math.min(1, Math.max(0, progress ?? 0)) * 100);
+    const fill = progress === undefined ? undefined : {
+      background: `linear-gradient(90deg, color-mix(in srgb, var(--accent) 45%, transparent) ${p}%, color-mix(in srgb, var(--accent) 10%, transparent) ${p}%)`,
+    };
     return (
-      <span className="tabular inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 font-medium text-ink ring-1 ring-accent">
+      <span style={fill}
+            className="tabular inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 font-medium text-ink ring-1 ring-accent">
         <span className="h-2 w-2 rounded-full bg-accent motion-safe:animate-pulse" aria-hidden />
-        {label}: {minutes} min left
+        {label}:{" "}
+        {secondsLeft === undefined ? `${minutes} min left` : secondsLeft > 0 ? `${clock(secondsLeft)} left` : "finishing…"}
       </span>
     );
   }
@@ -277,8 +317,9 @@ function WeatherHold({ status, onChange }: { status: Status; onChange: () => voi
   );
 }
 
-function ControllerCard({ status }: { status: Status }) {
+function ControllerCard({ status, names }: { status: Status; names: Record<number, string> }) {
   const { link, settings } = status;
+  const watering = status.running.length > 0;
   return (
     <section className="card space-y-3 text-sm">
       <h2 className="h2">Controller</h2>
@@ -286,6 +327,11 @@ function ControllerCard({ status }: { status: Status }) {
         <span>{link.model ?? "—"}</span>·<span>firmware {link.firmware ?? "—"}</span>·
         <LinkState link={link} />
         {link.last_ok && <>·<span className="tabular">last reply {new Date(link.last_ok * 1000).toLocaleTimeString()}</span></>}
+      </p>
+      {/* What the controller itself reports, whoever started it: the check behind the Now card. */}
+      <p className="text-ink-2">
+        <span className="text-ink">Running: {watering ? status.running.map((z) => zoneLabel(z, names)).join(", ") : "nothing"}</span>
+        {status.running_read_at && <span className="tabular"> (read {hm(status.running_read_at)})</span>}
       </p>
       <p className="text-ink-2">
         <span className="text-ink">Rain delay: {status.rain_delay ?? "—"} day(s)</span>
