@@ -108,7 +108,10 @@ function NowCard({ status, names, now, onChange }: {
           <div className="text-xs font-medium text-ink-2">Now</div>
           {cur ? (
             <>
-              <div className="text-[28px] leading-tight font-semibold tracking-tight text-ink">{cur.name}</div>
+              {/* A trailing "(...)" note, like "(Rain Bird PGM A)", is left to the smaller lists; the headline is the name. */}
+              <div className="text-[28px] leading-tight font-semibold tracking-tight text-ink" title={cur.name}>
+                {cur.name.replace(/\s*\([^()]*\)\s*$/, "") || cur.name}
+              </div>
               <div className="text-sm text-ink-2">
                 {cur.phase === "watering" && cur.zone != null && (
                   <>Watering {zoneLabel(cur.zone, names)} for {cur.minutes} min, until {hm(cur.ends_at)}</>
