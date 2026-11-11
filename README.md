@@ -1,125 +1,37 @@
-# Rain Bird ESP-TM2 local control
+# Sprinklers
 
-Talks to the ESP-TM2's LNK2 WiFi module directly on the LAN (192.168.0.105,
-HTTPS only) using [pyrainbird](https://github.com/allenporter/pyrainbird), the
-library behind Home Assistant's Rain Bird integration. Goal: add features the
-controller lacks, starting with cycle and soak.
+A local runner for a Rain Bird ESP-TM2 controller. It talks to the
+controller's LNK2 WiFi module directly on the LAN, with no cloud, using
+[pyrainbird](https://github.com/allenporter/pyrainbird) (the library behind
+Home Assistant's Rain Bird integration), and adds what the controller lacks.
 
-## The runner
+- **Cycle and soak:** split a zone's watering into short cycles with soaks
+  between, so it soaks in instead of running off.
+- **Plans** on days of the week or every N days, with a seasonal adjust and a
+  per-plan adjust, previewed on a timeline before they run.
+- **Weather hold:** skip watering for a few days, then water every plan on
+  the day after.
+- **Calendar** of past and upcoming runs, with watering time and gallons per
+  day, week and month.
+- **History** of every run, cycle by cycle.
+- **Safe fallback:** the controller keeps its own programs as a backup, held
+  back while this runs, and back in charge within a day if it stops.
 
-- `service/`: Python (FastAPI, port 8710, localhost only). Owns the controller
-  connection, the cycle-and-soak planner, the scheduler and SQLite. Run it
-  against a simulated controller with
-  `python -m rbservice --sim --speed 10 --tz America/Phoenix`. Tests:
-  `cd service && ../.venv313/Scripts/python -m pytest -q tests/` (planner
-  invariants and whole runs against the simulator, time at 120x).
-- `web/`: Next.js 16 page (port 3004 on the NUC, http://amethyst:3004) with status, plans (editor
-  with timeline preview), a calendar, history and settings. It talks only to
-  the service through `/api/svc/*`. The calendar (`/api/calendar?start=&days=`)
-  shows past runs from history and expected runs from the plans at today's
-  seasonal adjust, plus the controller's own program days (struck through while
-  the rain-delay fallback holds them back).
-- The page's look (colour tokens, Geist, header, pill nav, cards, buttons,
-  inputs) is copied from the pool app (`F:/Claude/PoolDataVisualizer`) so the
-  home-screen apps match; tokens live in `web/src/app/globals.css`, shared
-  pieces (status marks, banners) in `web/src/lib/ui.tsx`. Change colours in
-  the pool app first.
-- **Backups:** weekly (Sundays 03:15 NUC time, `rainbird-backup.timer`) as a
-  plain-text SQL dump to the private repo `smbell1979/rainbird-backup`, via
-  `~/rainbird-backup` on the NUC, pushed with its own deploy key
-  `~/.ssh/id_ed25519_rainbird_backup`. `deploy/backup.sh` (dry run unless
-  `--apply`) refuses a corrupt snapshot, an empty one, or one that lost more
-  than half the run history. Restore: `docker compose stop service` in
-  `~/rainbird`, then `sqlite3 rainbird.db < rainbird.sql`. The first backup was restore-tested
-  from GitHub's copy into a fresh database: every table matched the live one.
-  The code itself is in `smbell1979/rainbird`.
-- **Runs as two containers** on amethyst, `rainbird-service` and
-  `rainbird-web` (`docker-compose.yml`, `~/rainbird` on the NUC), the same
-  shape as Pool and Weather, so they show in Beszel next to them. Both use
-  host networking: the API stays on 127.0.0.1:8710 and the page on 3004, and
-  the controller is reached directly on the LAN. The database is the bind
-  mount `~/rainbird/data`, the PIN `~/rainbird/controller-pin.txt` (mounted
-  read-only). The time zone is set in the compose file. Until 2026-11-03 they
-  were systemd user services; the first container deploy retired those.
-- **Deploy:** `deploy/ship.sh` (committed work; `--dirty` for a throwaway
-  build) copies the tree to the NUC, replacing the source directories, and
-  runs `deploy/remote-deploy.sh` there. That builds both images (the service
-  image runs the whole test suite against the simulator) while the running
-  version carries on, then switches, but refuses to while a zone is watering
-  or a run is queued (`FORCE=1` overrides). Images are tagged with their
-  commit; `deploy/rollback.sh` lists them and switches back without a
-  rebuild. The service gets 90 s to stop, so a stop mid-run closes the valve
-  and confirms it.
+It runs on a home server (the NUC, `amethyst`) as two Docker containers, with
+the page at http://amethyst:3004.
 
-How it waters:
-- **Fallback:** the controller keeps its own programs as a backup. Each night
-  at 00:10 the service sets a 1-day rain delay (only when the delay is 0, never
-  lowering one) and waters with manual runs, which work during a rain delay. If
-  the service stops, the delay runs out and the controller's programs resume.
-- **Read-back:** every start and stop is confirmed by reading the zone state. A
-  start that got no answer is never re-sent blindly. A zone started from the app
-  or the panel ends the run instead of being fought.
-- **Seasonal adjust:** a global seasonal adjust plus an optional per-plan
-  adjust. A zone that rounds to 0 min is reported, not dropped.
-- **Weather hold** (Status page, `PUT /api/hold {days}`, `DELETE /api/hold`):
-  no watering for N days counting today, then every plan that is on waters
-  on the day after at its usual time, and every-N-day plans count from that
-  day (their anchor is rewritten on it, once). Held days get a skipped run in
-  history and are hatched on the calendar. It lives in this service, not in
-  the controller's rain delay, which the fallback renews nightly and which
-  can't water every plan on the resume day. Cancelling before the resume day
-  puts plans back on their own days with no make-up run.
+## Docs
 
-## Setup
+- [How it works](docs/how-it-works.md): the fallback, confirming every
+  command, adjusts, the weather hold, and what is recorded.
+- [Running and deploying](docs/running-and-deploying.md): setting up, the
+  simulator, tests, deploying to the NUC, rollback, and backups.
+- [The controller](docs/controller.md): the read-only probe, the password
+  lockout guard, and how the LNK2 module behaves.
 
-pyrainbird 6.4+ requires Python 3.13. The environment uses a standalone 3.13
-fetched by [uv](https://docs.astral.sh/uv/) so the system `py` default is
-untouched:
+## Layout
 
-    pip install uv
-    uv venv --python 3.13 .venv313
-    uv pip install --python .venv313\Scripts\python.exe -r requirements.txt
-
-## probe.py: read-only first contact
-
-    .venv313\Scripts\python probe.py
-
-Reads model, firmware, zones, current state, seasonal adjust and the stored
-programs. It sends no command that changes anything.
-
-Before running:
-
-1. Put the controller password (the one the Rain Bird app asks for) alone in
-   `controller-password.txt` here. It is git-ignored and never printed.
-2. Close the Rain Bird app on every phone. The module serves one client at a
-   time.
-
-Each run writes `probe-logs/<time>.json` (results) and `probe-logs/<time>.log`
-(pyrainbird's debug log with every raw reply; any record mentioning a password
-is blanked).
-
-### Lockout guard
-
-The LNK2 locks out local access for 15 minutes after 3 bad passwords. The probe
-records each failed first contact that may have reached the password check in
-`.probe-password-failures.json`, and refuses to run once there are 2 in the
-last 15 minutes. A connection that was refused, or a "busy" reply, is not
-counted. A successful run clears the record.
-
-## Known module behaviour
-
-- LNK2 firmware 4.x is reported to answer the first request and then time out
-  or reset connections (home-assistant/core#169765, unresolved). Measured here
-  (LNK2 on ESP-TM2 fw 2.29.0, 20 reads each): a fresh HTTPS connection per
-  request took ~4 s per reply and 20% went unanswered; one kept-alive connection
-  took ~0.25 s and all answered. The probe therefore keeps the connection alive
-  (`--fresh-connections` to re-test), spaces requests 1 s apart, retries an
-  unanswered read once, and stops after 3 unanswered reads in a row. Some reads
-  still need that retry.
-- After an unanswered request the module often refuses the next connection
-  outright for a few seconds. It seems to stay stuck on the abandoned one.
-- `getServerMode` shows the module checks in with an AWS IoT endpoint every 60 s.
-  The combined-state seasonal adjust reads 65535 (0xFFFF, presumably "per
-  program"). The real values are per program.
-- pyrainbird can read ESP-TM2 programs but not write them (`set_zone_schedule`
-  is for ESP-RZXe/ST8 only).
+    service/   Python service (FastAPI): controller link, planner, scheduler, SQLite
+    web/       Next.js page: Status, Plans, Calendar, History, Settings
+    deploy/    ship, deploy and roll back on the NUC; weekly database backup
+    probe.py   read-only first contact with the controller
